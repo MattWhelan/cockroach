@@ -420,6 +420,12 @@ func (a *apiV2SystemServer) restartSafetyCheck(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	highRisk, err := strconv.ParseBool(r.URL.Query().Get("high_risk"))
+	if err != nil {
+		http.Error(w, "invalid high_risk value; should be true or false", http.StatusBadRequest)
+		return
+	}
+
 	nodeID := a.systemStatus.node.Descriptor.NodeID
 
 	res, err := checkRestartSafe(
@@ -428,6 +434,7 @@ func (a *apiV2SystemServer) restartSafetyCheck(w http.ResponseWriter, r *http.Re
 		a.systemStatus.nodeLiveness,
 		a.systemStatus.stores,
 		a.systemStatus.storePool.ClusterNodeCount(),
+		highRisk,
 	)
 	if err != nil {
 		http.Error(w, "Error checking store status", http.StatusInternalServerError)
@@ -471,7 +478,15 @@ func checkRestartSafe(
 	nodeLiveness livenesspb.NodeVitalityInterface,
 	stores storeVisitor,
 	nodeCount int,
+	highRisk bool,
 ) (*RestartSafetyResponse, error) {
+	const (
+		Unavailable      = "Unavailable"
+		Underreplicated  = "Underreplicated"
+		IsRaftLeader     = "IsRaftLeader"
+		StoreNotDraining = "StoreNotDraining"
+	)
+
 	res := &RestartSafetyResponse{
 		IsRestartSafe: true,
 		NodeID:        int32(nodeID),
@@ -502,16 +517,34 @@ func checkRestartSafe(
 			statusString := ""
 			switch {
 			case !rangeStatus.Available:
-				statusString = "Unavailable"
+				statusString = Unavailable
 			case rangeStatus.UnderReplicated:
-				statusString = "Underreplicated"
+				statusString = Underreplicated
 			case isLeader:
-				statusString = "IsRaftLeader"
+				statusString = IsRaftLeader
 			case !store.IsDraining():
-				statusString = "StoreNotDraining"
+				statusString = StoreNotDraining
 			default:
 				return true
 			}
+
+			if neededVoters >= 5 && highRisk && statusString != Underreplicated {
+				// When neededVoters >= 5, present underreplication doesn't actually imply unavailability after we terminate
+				// this node. The caller has opted in to highRisk restarts, so check whether this node being down actually
+				// causes unavailability.
+				futureStatus := desc.Replicas().ReplicationStatus(func(rd roachpb.ReplicaDescriptor) bool {
+					if rd.NodeID == nodeID {
+						return false
+					}
+					return vitality[rd.NodeID].IsLive(livenesspb.Metrics)
+				}, neededVoters, -1)
+				if futureStatus.Available {
+					// Caller has opted in to highRisk restarts, so we don't care if ranges are currently under-replicated,
+					// only if taking down this node makes a range unavailable. This only really matters for RF>=5.
+					return true
+				}
+			}
+
 			status := ReplicaStatus{
 				StoreID:   int32(store.StoreID()),
 				RangeID:   int32(id.RangeID),

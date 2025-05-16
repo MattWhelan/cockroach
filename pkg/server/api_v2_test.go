@@ -340,7 +340,7 @@ func TestCheckRestartSafe_Criticality(t *testing.T) {
 
 	ts1 := testCluster.Server(0)
 
-	res, err := checkRestartSafe(ctx, ts1.NodeID(), ts1.NodeLiveness().(livenesspb.NodeVitalityInterface), ts1.GetStores().(storeVisitor), 3)
+	res, err := checkRestartSafe(ctx, ts1.NodeID(), ts1.NodeLiveness().(livenesspb.NodeVitalityInterface), ts1.GetStores().(storeVisitor), 3, false)
 	require.NoError(t, err)
 	require.False(t, res.IsRestartSafe)
 
@@ -357,7 +357,7 @@ func TestCheckRestartSafe_Criticality(t *testing.T) {
 	err = drain(ctx, ts1, t)
 	require.NoError(t, err)
 
-	res, err = checkRestartSafe(ctx, ts1.NodeID(), ts1.NodeLiveness().(livenesspb.NodeVitalityInterface), ts1.GetStores().(storeVisitor), 3)
+	res, err = checkRestartSafe(ctx, ts1.NodeID(), ts1.NodeLiveness().(livenesspb.NodeVitalityInterface), ts1.GetStores().(storeVisitor), 3, false)
 	// Now that we've drained, we're ok to restart
 	require.NoError(t, err)
 	require.True(t, res.IsRestartSafe)
@@ -386,7 +386,7 @@ func TestCheckRestartSafe_RangeStatus(t *testing.T) {
 	require.True(t, vitality.GetNodeVitalityFromCache(ts0.NodeID()).IsDraining())
 	require.False(t, vitality.GetNodeVitalityFromCache(ts1nodeID).IsLive(livenesspb.Metrics))
 
-	res, err := checkRestartSafe(ctx, ts0.NodeID(), vitality, ts0.GetStores().(storeVisitor), 3)
+	res, err := checkRestartSafe(ctx, ts0.NodeID(), vitality, ts0.GetStores().(storeVisitor), 3, false)
 	require.NoError(t, err)
 	require.False(t, res.IsRestartSafe, "expected unsafe since a different node is down")
 
@@ -425,7 +425,7 @@ func TestCheckRestartSafe_Integration(t *testing.T) {
 	err = drain(ctx, ts0, t)
 	require.NoError(t, err)
 
-	res, err := checkRestartSafe(ctx, ts0.NodeID(), vitality, ts0.GetStores().(storeVisitor), 3)
+	res, err := checkRestartSafe(ctx, ts0.NodeID(), vitality, ts0.GetStores().(storeVisitor), 3, false)
 	require.NoError(t, err)
 	require.False(t, res.IsRestartSafe, "expected unsafe since a different node is down")
 
